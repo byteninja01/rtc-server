@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -18,9 +17,8 @@ type CollabRequest struct {
 }
 
 type CollabApproval struct {
-	CollabID      string `json:"collab_id"`
-	Status        string `json:"status"`
-	ApproverToken string `json:"approver_token"` // GitHub token for authentication
+	CollabID string `json:"collab_id"`
+	Status   string `json:"status"` // "approved" or "rejected"
 }
 
 type CollabNotification struct {
@@ -32,6 +30,17 @@ type CollabNotification struct {
 	CollaboratorName  string `json:"collaborator_name"`
 	Status            string `json:"status"`
 	CreatedAt         string `json:"created_at"`
+}
+
+type PendingCollabDetail struct {
+	CollabID          string `json:"collab_id"`
+	CollaboratorID    string `json:"collaborator_id"`
+	CollaboratorName  string `json:"collaborator_name"`
+	CollaboratorEmail string `json:"collaborator_email"`
+	ProjectID         string `json:"project_id"`
+	ProjectName       string `json:"project_name"`
+	Status            string `json:"status"`
+	RequestedAt       string `json:"requested_at"`
 }
 
 // RequestCollaboration - Creates a collaboration request with pending status
@@ -108,7 +117,7 @@ func RequestCollaboration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send notification to collaborator (in production, send email)
+	// Send notification to collaborator
 	notification := CollabNotification{
 		CollabID:          collab.ID.String(),
 		ProjectID:         project.ID.String(),
@@ -138,8 +147,18 @@ func RequestCollaboration(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ApproveCollaboration - Approves/Rejects collaboration with token authentication
+// ApproveCollaboration - Approves/Rejects collaboration using SESSION-based authentication
 func ApproveCollaboration(w http.ResponseWriter, r *http.Request) {
+	// Get session from context (set by SessionAuth middleware)
+	session, ok := GetSessionFromContext(r)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Session not found. Please login first.",
+		})
+		return
+	}
+
 	var req CollabApproval
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -179,33 +198,11 @@ func ApproveCollaboration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get collaborator user
-	userModel := &db.UserModel{DB: db.DB}
-	collaborator, err := userModel.GetUserByID(collab.UserID)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+	// VERIFY: The logged-in user (from session) must be the collaborator
+	if collab.UserID != session.UserID {
+		w.WriteHeader(http.StatusForbidden)
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Failed to fetch collaborator details",
-		})
-		return
-	}
-
-	// Authenticate collaborator using token
-	tokenModel := &db.TokenModel{DB: db.DB}
-	storedToken, err := tokenModel.GetToken(collaborator.USERNAME)
-	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Collaborator authentication failed",
-		})
-		return
-	}
-
-	// Verify the provided token matches stored token
-	if storedToken.GITHUB_TOKEN != req.ApproverToken {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Invalid authentication token",
+			"error": "You are not authorized to approve/reject this collaboration request",
 		})
 		return
 	}
@@ -227,7 +224,7 @@ func ApproveCollaboration(w http.ResponseWriter, r *http.Request) {
 	fmt.Printf("\n=== COLLABORATION %s ===\n", req.Status)
 	fmt.Printf("Collaboration ID: %s\n", req.CollabID)
 	fmt.Printf("Project: %s\n", project.Name)
-	fmt.Printf("Collaborator: %s (%s)\n", collaborator.USERNAME, collaborator.EMAIL)
+	fmt.Printf("Collaborator: %s (%s)\n", session.Username, session.Email)
 	fmt.Printf("New Status: %s\n", req.Status)
 	fmt.Printf("==========================================\n\n")
 
@@ -237,6 +234,86 @@ func ApproveCollaboration(w http.ResponseWriter, r *http.Request) {
 		"message":   fmt.Sprintf("Collaboration request %s", req.Status),
 		"collab_id": req.CollabID,
 		"status":    req.Status,
+	})
+}
+
+// GetProjectPendingCollaborations - Owner gets all pending collab requests for their project
+// Requires session authentication
+func GetProjectPendingCollaborations(w http.ResponseWriter, r *http.Request) {
+	// Get session from context
+	session, ok := GetSessionFromContext(r)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Session not found. Please login first.",
+		})
+		return
+	}
+
+	// Get project name from query parameter
+	projectName := r.URL.Query().Get("project_name")
+	if projectName == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "project_name is required",
+		})
+		return
+	}
+
+	// Get project by name and verify ownership
+	projectModel := &db.ProjectModel{DB: db.DB}
+	project, err := projectModel.GetProjectByName(session.UserID, projectName)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Project not found or you are not the owner",
+		})
+		return
+	}
+
+	// Get all collaborators for the project
+	collabModel := &db.CollaboratorModel{DB: db.DB}
+	collaborators, err := collabModel.GetProjectCollaborators(project.ID)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Failed to fetch collaboration requests",
+		})
+		return
+	}
+
+	// Filter pending requests and get user details
+	userModel := &db.UserModel{DB: db.DB}
+	pendingRequests := []PendingCollabDetail{}
+
+	for _, collab := range collaborators {
+		if collab.Status == "pending" {
+			user, err := userModel.GetUserByID(collab.UserID)
+			if err != nil {
+				continue
+			}
+
+			pendingRequests = append(pendingRequests, PendingCollabDetail{
+				CollabID:          collab.ID.String(),
+				CollaboratorID:    user.ID.String(),
+				CollaboratorName:  user.USERNAME,
+				CollaboratorEmail: user.EMAIL,
+				ProjectID:         project.ID.String(),
+				ProjectName:       project.Name,
+				Status:            collab.Status,
+				RequestedAt:       collab.CreatedAt.Format("2006-01-02 15:04:05"),
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"project_name": projectName,
+		"project_id":   project.ID.String(),
+		"owner":        session.Username,
+		"requests":     pendingRequests,
+		"total":        len(pendingRequests),
 	})
 }
 
@@ -316,40 +393,6 @@ func GetUserCollaborationRequests(w http.ResponseWriter, r *http.Request) {
 		"user_email": userEmail,
 		"requests":   requests,
 		"total":      len(requests),
-	})
-}
-
-// GetCollaboratorToken - Returns GitHub token for authenticated collaborator (protected endpoint)
-func GetCollaboratorToken(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	username := vars["username"]
-	superUserKey := vars["super_user_key"]
-
-	// Verify super user access
-	if superUserKey != os.Getenv("SECRET_KEY") {
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Unauthorized access",
-		})
-		return
-	}
-
-	tokenModel := &db.TokenModel{DB: db.DB}
-	token, err := tokenModel.GetToken(username)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Token not found for user",
-		})
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"username":     token.USERNAME,
-		"github_token": token.GITHUB_TOKEN,
-		"user_id":      token.USER_ID,
 	})
 }
 
