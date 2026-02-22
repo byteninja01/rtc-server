@@ -90,6 +90,10 @@ func SetupRoutes() *mux.Router {
 	// User Management (Protected)
 	protectedRoutes.HandleFunc("/users/{user}", services.DeleteUser).Methods("DELETE")
 
+	// Unity Plugin Compatibility Routes
+	protectedRoutes.HandleFunc("/start-collaboration", services.PushProject).Methods("POST")
+	protectedRoutes.HandleFunc("/join-collaboration", services.JoinCollaboration).Methods("POST")
+
 	// ADMIN ROUTES - Super user key required
 	adminRoutes := r.PathPrefix("/admin").Subrouter()
 	adminRoutes.Use(services.CORS)
