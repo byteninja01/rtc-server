@@ -19,6 +19,10 @@ func SetupRoutes() *mux.Router {
 	r.HandleFunc("/github/logout", services.LogoutHandler).Methods("POST")
 
 	// Health check (No auth required)
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("URTC Server is running!"))
+	}).Methods("GET")
 	r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))

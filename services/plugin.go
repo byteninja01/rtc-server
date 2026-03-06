@@ -59,14 +59,7 @@ func PushProject(w http.ResponseWriter, r *http.Request) {
 		//Check if a project by this name already exists
 		project, err := projectModel.GetProjectByName(user.ID, metaUser.PROJECT_NAME)
 		if err != nil {
-			project, err := projectModel.CreateProject(user.ID, metaUser.PROJECT_NAME, metaUser.PROJECT_NAME)
-			if err != nil {
-				fmt.Println("Error : ", err)
-				w.WriteHeader(http.StatusInternalServerError)
-			}
-			fmt.Println("Project Created Succesfully")
-
-			//Start Initializing a github repo here
+			// Start Initializing a github repo here
 			payload := map[string]interface{}{
 				"name":    metaUser.PROJECT_NAME,
 				"private": false,
@@ -82,37 +75,46 @@ func PushProject(w http.ResponseWriter, r *http.Request) {
 			resp, err := client.Do(req)
 			if err != nil {
 				fmt.Println("Error:", err)
+				println("ujjwal")
+				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode == 201 {
-				fmt.Println("Repository created successfully!")
-			} else {
-				fmt.Println("Failed to create repository. Status:", resp.Status)
-			}
-
 			var repos struct {
 				Name    string `json:"name"`
-				HTMLURL string `json:"html_url"` // This is the repo link
+				HTMLURL string `json:"html_url"`
 			}
 
 			if err := json.NewDecoder(resp.Body).Decode(&repos); err != nil {
-				http.Error(w, "Failed to parse repos", http.StatusInternalServerError)
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Failed to parse GitHub response"})
 				return
 			}
 
-			fmt.Fprintln(w, "success : ", http.StatusOK)
-			fmt.Fprintln(w, "message : Collaboration started successfully for project ", project.Name)
-			fmt.Fprintln(w, "project_id : ", project.ID)
-			fmt.Fprintf(w, "github repo URL: %s", repos.HTMLURL)
+			project, err = projectModel.CreateProject(user.ID, metaUser.PROJECT_NAME, metaUser.PROJECT_NAME, repos.HTMLURL)
+			if err != nil {
+				fmt.Println("Error : ", err)
+				w.WriteHeader(http.StatusInternalServerError)
+				json.NewEncoder(w).Encode(map[string]string{"error": "Failed to save project to database: " + err.Error()})
+				return
+			}
+			fmt.Println("Project Created Succesfully")
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":      true,
+				"message":      "Collaboration started successfully",
+				"project_id":   project.ID.String(),
+				"repo_url":     project.RepoURL,
+				"github_token": token.GITHUB_TOKEN,
+			})
 
 		} else {
-			fmt.Println("Project already exists with the name : ", project.Name)
 			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Project already exists with this name"})
 		}
 	}
-
 }
 
 // func RequestCollaboration(w http.ResponseWriter, r *http.Request) {
@@ -303,11 +305,29 @@ func JoinCollaboration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch the collaborator's token to return to Unity
+	userModel := &db.UserModel{DB: db.DB}
+	user, err := userModel.GetUserByEmail(req.UserEmail)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to fetch user details"})
+		return
+	}
+
+	tokenModel := &db.TokenModel{DB: db.DB}
+	token, err := tokenModel.GetToken(user.USERNAME)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": "User token not found. Please re-authenticate."})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":    true,
-		"message":    "Joined collaboration successfully",
-		"project_id": project.ID.String(),
-		"repo_url":   "https://github.com/TODO/" + project.Name,
+		"success":      true,
+		"message":      "Joined collaboration successfully",
+		"project_id":   project.ID.String(),
+		"repo_url":     project.RepoURL,
+		"github_token": token.GITHUB_TOKEN,
 	})
 }

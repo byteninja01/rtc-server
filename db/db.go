@@ -74,12 +74,19 @@ func InitProjectTable() {
 		owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
 		name TEXT NOT NULL,
 		description TEXT,
+		repo_url TEXT,
 		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`
 
 	_, err := DB.Exec(query)
 	if err != nil {
 		log.Fatal("Failed to create project table: ", err)
+	}
+
+	// Migration: add repo_url column if it was missing from an older schema
+	_, err = DB.Exec(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS repo_url TEXT`)
+	if err != nil {
+		log.Fatal("Failed to migrate projects table (add repo_url): ", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package services
 
 import (
 	"app/urtc/db"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -18,6 +19,8 @@ func NProjects(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println("Invalid Username")
 		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid username"})
+		return
 	} else {
 		owner_id := user.ID
 		projectModel := &db.ProjectModel{
@@ -27,8 +30,15 @@ func NProjects(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fmt.Println("Error : ", err)
 			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to fetch projects"})
+			return
 		}
-		fmt.Fprintf(w, "No of Projects : %d", len(projects))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"owner":    username,
+			"count":    len(projects),
+			"projects": projects,
+		})
 	}
 }
 
@@ -42,6 +52,8 @@ func GetProjects(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fmt.Println("Invalid Username")
 		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid username"})
+		return
 	} else {
 		owner_id := user.ID
 		projectModel := &db.ProjectModel{
@@ -51,12 +63,12 @@ func GetProjects(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			fmt.Println("Error : ", err)
 			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Failed to fetch projects"})
+			return
 		}
 
-		for i := 0; i < len(projects); i++ {
-			project := projects[i]
-			fmt.Fprintf(w, "ID : %d , Owner ID : %d, Name : %s, Description : %s, Created At : %s \n", project.ID, project.OwnerID, project.Name, project.Description, project.CreatedAt)
-		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(projects)
 	}
 }
 func GetProject(w http.ResponseWriter, r *http.Request) {
@@ -69,8 +81,8 @@ func GetProject(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := userModel.GetUser(username)
 	if err != nil {
-		http.Error(w, "Invalid owner ID", http.StatusBadRequest)
 		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid owner ID"})
 		return
 	} else {
 		ownerID := user.ID
@@ -80,11 +92,13 @@ func GetProject(w http.ResponseWriter, r *http.Request) {
 		project, err := projectModel.GetProjectByName(ownerID, nameStr)
 		if err != nil {
 			fmt.Println("Error : ", err)
-			w.WriteHeader(http.StatusBadRequest)
-
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Project not found"})
+			return
 		}
 
-		fmt.Fprintf(w, "ID : %d , Owner ID : %d, Name : %s, Description : %s, Created At : %s \n", project.ID, project.OwnerID, project.Name, project.Description, project.CreatedAt)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(project)
 	}
 }
 

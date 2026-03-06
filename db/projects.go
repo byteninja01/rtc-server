@@ -12,6 +12,7 @@ type Project struct {
 	OwnerID     uuid.UUID `json:"owner_id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
+	RepoURL     string    `json:"repo_url"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -20,19 +21,19 @@ type ProjectModel struct {
 }
 
 // CreateProject - Creates a new project
-func (m *ProjectModel) CreateProject(ownerID uuid.UUID, name, description string) (*Project, error) {
+func (m *ProjectModel) CreateProject(ownerID uuid.UUID, name, description, repoURL string) (*Project, error) {
 	query := `
-		INSERT INTO projects (id, owner_id, name, description, created_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, owner_id, name, description, created_at
+		INSERT INTO projects (id, owner_id, name, description, repo_url, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, owner_id, name, description, repo_url, created_at
 	`
 
 	id := uuid.New()
 	now := time.Now()
 
 	var project Project
-	err := m.DB.QueryRow(query, id, ownerID, name, description, now).Scan(
-		&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.CreatedAt,
+	err := m.DB.QueryRow(query, id, ownerID, name, description, repoURL, now).Scan(
+		&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.RepoURL, &project.CreatedAt,
 	)
 
 	if err != nil {
@@ -45,14 +46,14 @@ func (m *ProjectModel) CreateProject(ownerID uuid.UUID, name, description string
 // GetProjectByID - Gets project by ID
 func (m *ProjectModel) GetProjectByID(projectID uuid.UUID) (*Project, error) {
 	query := `
-		SELECT id, owner_id, name, description, created_at
+		SELECT id, owner_id, name, description, repo_url, created_at
 		FROM projects
 		WHERE id = $1
 	`
 
 	var project Project
 	err := m.DB.QueryRow(query, projectID).Scan(
-		&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.CreatedAt,
+		&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.RepoURL, &project.CreatedAt,
 	)
 
 	if err != nil {
@@ -65,14 +66,14 @@ func (m *ProjectModel) GetProjectByID(projectID uuid.UUID) (*Project, error) {
 // GetProjectByName - Gets project by owner ID and name
 func (m *ProjectModel) GetProjectByName(ownerID uuid.UUID, name string) (*Project, error) {
 	query := `
-		SELECT id, owner_id, name, description, created_at
+		SELECT id, owner_id, name, description, repo_url, created_at
 		FROM projects
 		WHERE owner_id = $1 AND name = $2
 	`
 
 	var project Project
 	err := m.DB.QueryRow(query, ownerID, name).Scan(
-		&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.CreatedAt,
+		&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.RepoURL, &project.CreatedAt,
 	)
 
 	if err != nil {
@@ -85,7 +86,7 @@ func (m *ProjectModel) GetProjectByName(ownerID uuid.UUID, name string) (*Projec
 // GetProjectsByUser - Gets all projects for a user
 func (m *ProjectModel) GetProjectsByUser(ownerID uuid.UUID) ([]Project, error) {
 	query := `
-		SELECT id, owner_id, name, description, created_at
+		SELECT id, owner_id, name, description, repo_url, created_at
 		FROM projects
 		WHERE owner_id = $1
 		ORDER BY created_at DESC
@@ -101,7 +102,7 @@ func (m *ProjectModel) GetProjectsByUser(ownerID uuid.UUID) ([]Project, error) {
 	for rows.Next() {
 		var project Project
 		err := rows.Scan(
-			&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.CreatedAt,
+			&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.RepoURL, &project.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
@@ -146,7 +147,7 @@ func (m *ProjectModel) UpdateProject(projectID uuid.UUID, name, description stri
 // GetAllProjects - Gets all projects (admin function)
 func (m *ProjectModel) GetAllProjects() ([]Project, error) {
 	query := `
-		SELECT id, owner_id, name, description, created_at
+		SELECT id, owner_id, name, description, repo_url, created_at
 		FROM projects
 		ORDER BY created_at DESC
 	`
@@ -161,7 +162,7 @@ func (m *ProjectModel) GetAllProjects() ([]Project, error) {
 	for rows.Next() {
 		var project Project
 		err := rows.Scan(
-			&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.CreatedAt,
+			&project.ID, &project.OwnerID, &project.Name, &project.Description, &project.RepoURL, &project.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
